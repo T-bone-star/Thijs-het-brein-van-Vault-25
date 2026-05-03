@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>VAULT-25 // NEURAL INTERFACE UNIT</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=VT323&display=swap');
+
+  :root {
+    --amber: #ffb000;
+    --amber-dim: #7a5500;
+    --amber-glow: #ffd060;
+    --green: #39ff14;
+    --red: #ff3300;
+    --bg: #0a0800;
+    --panel: #0f0b00;
+    --scanline: rgba(0,0,0,0.15);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 100%; height: 100%;
+    background: var(--bg);
+    color: var(--amber);
+    font-family: 'Share Tech Mono', monospace;
+    overflow: hidden;
+    cursor: none;
+  }
+
+  /* CRT scanlines overlay */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: 9999;
+    background: repeating-linear-gradient(
+      to bottom,
+      transparent 0px,
+      transparent 3px,
+      var(--scanline) 3px,
+      var(--scanline) 4px
+    );
+    pointer-events: none;
+  }
+
+  /* CRT vignette */
+  body::after {
+    content: '';
+    position: fixed; inset: 0; z-index: 9998;
+    background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.85) 100%);
+    pointer-events: none;
+  }
+
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    padding: 12px;
+    gap: 8px;
+    position: relative;
+  }
+
+  /* HEADER */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 1px solid var(--amber-dim);
+    padding-bottom: 8px;
+    flex-shrink: 0;
+  }
+
+  .vault-logo {
+    font-family: 'VT323', monospace;
+    font-size: 11px;
+    line-height: 1.3;
+    color: var(--amber-dim);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+
+  .vault-logo span {
+    display: block;
+    font-size: 22px;
+    color: var(--amber);
+    text-shadow: 0 0 10px var(--amber);
+    letter-spacing: 4px;
+  }
+
+  .status-panel {
+    text-align: right;
+    font-size: 10px;
+    color: var(--amber-dim);
+    line-height: 1.8;
+  }
+
+  .status-online { color: var(--green); }
+  .status-warn { color: var(--amber); }
+  .status-offline { color: var(--red); }
+
+  .blink { animation: blink 1.2s step-end infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* BRAIN VISUAL */
+  .brain-container {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 10px;
+    border: 1px solid var(--amber-dim);
+    background: var(--panel);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .brain-container::before {
+    content: 'NEURAL CONTAINMENT UNIT // SPECIMEN: THIJS V.';
+    position: absolute;
+    top: 4px; left: 8px;
+    font-size: 9px;
+    color: var(--amber-dim);
+    letter-spacing: 1px;
+  }
+
+  .brain-visual {
+    width: 80px;
+    height: 80px;
+    flex-shrink: 0;
+    position: relative;
+    margin-top: 10px;
+  }
+
+  .brain-visual svg {
+    width: 100%; height: 100%;
+    filter: drop-shadow(0 0 6px var(--amber)) drop-shadow(0 0 14px #ff8c00);
+    animation: brainPulse 3s ease-in-out infinite;
+  }
+
+  @keyframes brainPulse {
+    0%, 100% { filter: drop-shadow(0 0 6px var(--amber)) drop-shadow(0 0 14px #ff8c00); transform: scale(1); }
+    50% { filter: drop-shadow(0 0 12px var(--amber-glow)) drop-shadow(0 0 24px #ffcc00); transform: scale(1.04); }
+  }
+
+  .brain-stats {
+    flex: 1;
+    font-size: 10px;
+    line-height: 2;
+    margin-top: 12px;
+  }
+
+  .stat-bar-wrap { display: flex; align-items: center; gap: 8px; }
+  .stat-label { width: 60px; color: var(--amber-dim); font-size: 9px; }
+  .stat-bar {
+    flex: 1;
+    height: 6px;
+    background: #1a1000;
+    border: 1px solid var(--amber-dim);
+    position: relative;
+    overflow: hidden;
+  }
+  .stat-bar-fill {
+    height: 100%;
+    background: var(--amber);
+    box-shadow: 0 0 6px var(--amber);
+    animation: statFlicker 4s ease-in-out infinite;
+  }
+  @keyframes statFlicker {
+    0%,100%{opacity:1} 92%{opacity:1} 93%{opacity:0.6} 94%{opacity:1} 97%{opacity:0.8} 98%{opacity:1}
+  }
+
+  .mood-display {
+    font-family: 'VT323', monospace;
+    font-size: 20px;
+    color: var(--amber-glow);
+    text-shadow: 0 0 8px var(--amber);
+    text-align: right;
+    margin-top: 12px;
+    letter-spacing: 1px;
+  }
+
+  /* CHAT LOG */
+  .chat-log {
+    flex: 1;
+    overflow-y: auto;
+    border: 1px solid var(--amber-dim);
+    background: var(--panel);
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+  }
+
+  .chat-log::-webkit-scrollbar { width: 4px; }
+  .chat-log::-webkit-scrollbar-track { background: var(--bg); }
+  .chat-log::-webkit-scrollbar-thumb { background: var(--amber-dim); }
+
+  .msg {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    animation: msgIn 0.3s ease;
+  }
+
+  @keyframes msgIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .msg-label {
+    font-size: 9px;
+    color: var(--amber-dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  .msg-player .msg-label { color: #4a7a3a; }
+  .msg-brain .msg-label { color: var(--amber-dim); }
+
+  .msg-text {
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 6px 8px;
+    border-left: 2px solid var(--amber-dim);
+  }
+
+  .msg-player .msg-text {
+    border-left-color: #39ff14;
+    color: #aaddaa;
+    background: #010d01;
+  }
+
+  .msg-brain .msg-text {
+    border-left-color: var(--amber);
+    color: var(--amber-glow);
+    background: #0d0a00;
+  }
+
+  .typing-indicator {
+    font-size: 13px;
+    color: var(--amber-dim);
+    padding: 6px 8px;
+    border-left: 2px solid var(--amber-dim);
+    display: none;
+  }
+
+  .typing-indicator.active { display: block; animation: typingPulse 0.8s ease-in-out infinite; }
+  @keyframes typingPulse { 0%,100%{opacity:0.4} 50%{opacity:1} }
+
+  /* INPUT AREA */
+  .input-area {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .input-row {
+    display: flex;
+    gap: 6px;
+    align-items: flex-end;
+  }
+
+  .input-wrapper {
+    flex: 1;
+    position: relative;
+    border: 1px solid var(--amber-dim);
+    background: var(--panel);
+  }
+
+  .input-wrapper::before {
+    content: '>';
+    position: absolute;
+    left: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--green);
+    font-size: 14px;
+  }
+
+  #userInput {
+    width: 100%;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--green);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px;
+    padding: 10px 10px 10px 22px;
+    caret-color: var(--green);
+  }
+
+  #userInput::placeholder { color: #1a3a1a; }
+
+  .btn {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    padding: 10px 12px;
+    border: 1px solid var(--amber-dim);
+    background: var(--panel);
+    color: var(--amber);
+    cursor: pointer;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    transition: all 0.1s;
+    white-space: nowrap;
+  }
+
+  .btn:hover { background: var(--amber); color: var(--bg); border-color: var(--amber); }
+  .btn:active { transform: scale(0.97); }
+  .btn-send { border-color: var(--amber); }
+  .btn-voice {
+    border-color: #444;
+    color: #444;
+  }
+  .btn-voice.listening {
+    border-color: var(--red);
+    color: var(--red);
+    animation: listenPulse 0.8s ease-in-out infinite;
+  }
+  @keyframes listenPulse { 0%,100%{box-shadow:0 0 0 var(--red)} 50%{box-shadow:0 0 8px var(--red)} }
+
+  .btn-voice.available { border-color: var(--amber-dim); color: var(--amber-dim); }
+
+  /* ADMIN PANEL */
+  .admin-toggle {
+    font-size: 9px;
+    color: #2a2000;
+    text-align: right;
+    cursor: pointer;
+    letter-spacing: 1px;
+    user-select: none;
+  }
+  .admin-toggle:hover { color: var(--amber-dim); }
+
+  .admin-panel {
+    display: none;
+    border: 1px dashed #2a2000;
+    background: #050400;
+    padding: 10px;
+    gap: 8px;
+    flex-direction: column;
+  }
+  .admin-panel.open { display: flex; }
+
+  .admin-panel label {
+    font-size: 9px;
+    color: var(--amber-dim);
+    letter-spacing: 1px;
+    display: block;
+    margin-bottom: 3px;
+  }
+
+  .admin-panel textarea, .admin-panel input[type=text] {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid #2a2000;
+    color: var(--amber-dim);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    padding: 6px;
+    resize: vertical;
+    outline: none;
+  }
+
+  .admin-panel textarea:focus, .admin-panel input:focus {
+    border-color: var(--amber-dim);
+  }
+
+  .admin-row { display: flex; gap: 6px; }
+
+  /* GLITCH */
+  @keyframes glitch {
+    0% { clip-path: inset(40% 0 61% 0); transform: translate(-2px, 0); }
+    20% { clip-path: inset(92% 0 1% 0); transform: translate(2px, 0); }
+    40% { clip-path: inset(43% 0 1% 0); transform: translate(1px, 0); }
+    60% { clip-path: inset(25% 0 58% 0); transform: translate(-1px, 0); }
+    80% { clip-path: inset(54% 0 7% 0); transform: translate(2px, 0); }
+    100% { clip-path: inset(58% 0 43% 0); transform: translate(-2px, 0); }
+  }
+
+  .glitch-active::after {
+    content: attr(data-text);
+    position: absolute;
+    left: 0; top: 0;
+    color: var(--red);
+    animation: glitch 0.3s steps(1) 3;
+    opacity: 0.7;
+  }
+
+  /* Welcome message */
+  .boot-text {
+    font-size: 10px;
+    color: var(--amber-dim);
+    line-height: 1.8;
+    font-family: 'Share Tech Mono', monospace;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="vault-logo">
+      Vault-Tec Corporation
+      <span>VAULT 25</span>
+      Neural Interface Terminal v2.3
+    </div>
+    <div class="status-panel">
+      <div>NEURAL LINK: <span id="linkStatus" class="status-online">● ACTIVE</span></div>
+      <div>CONTAINMENT: <span class="status-warn">◆ NOMINAL</span></div>
+      <div>SPECIMEN ID: <span>THIJS-V-001</span></div>
+      <div>UPTIME: <span id="uptime">00:00:00</span></div>
+    </div>
+  </div>
+
+  <!-- BRAIN VISUAL -->
+  <div class="brain-container">
+    <div class="brain-visual">
+      <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <!-- Jar/container -->
+        <rect x="25" y="68" width="50" height="28" rx="3" fill="none" stroke="#ffb000" stroke-width="1.5" opacity="0.5"/>
+        <line x1="25" y1="74" x2="75" y2="74" stroke="#ffb000" stroke-width="0.8" opacity="0.3"/>
+        <!-- Liquid lines in jar -->
+        <line x1="30" y1="82" x2="70" y2="82" stroke="#ffb000" stroke-width="0.5" opacity="0.2"/>
+        <!-- Brain shape -->
+        <ellipse cx="50" cy="45" rx="24" ry="20" fill="none" stroke="#ffb000" stroke-width="1.5"/>
+        <!-- Brain folds left -->
+        <path d="M28 42 Q35 35 38 42 Q41 50 34 52" fill="none" stroke="#ffb000" stroke-width="1" opacity="0.7"/>
+        <path d="M30 50 Q36 56 32 60" fill="none" stroke="#ffb000" stroke-width="1" opacity="0.5"/>
+        <!-- Brain folds right -->
+        <path d="M72 42 Q65 35 62 42 Q59 50 66 52" fill="none" stroke="#ffb000" stroke-width="1" opacity="0.7"/>
+        <path d="M70 50 Q64 56 68 60" fill="none" stroke="#ffb000" stroke-width="1" opacity="0.5"/>
+        <!-- Center fold -->
+        <path d="M50 26 Q53 38 50 45 Q47 52 50 64" fill="none" stroke="#ffb000" stroke-width="1" opacity="0.6"/>
+        <!-- Stem -->
+        <line x1="50" y1="64" x2="50" y2="68" stroke="#ffb000" stroke-width="2" opacity="0.6"/>
+        <!-- Wires/tubes from brain -->
+        <path d="M36 60 Q34 65 30 68" fill="none" stroke="#ffb000" stroke-width="0.8" opacity="0.4"/>
+        <path d="M64 60 Q66 65 70 68" fill="none" stroke="#ffb000" stroke-width="0.8" opacity="0.4"/>
+        <!-- Scan line indicator -->
+        <line x1="26" y1="44" x2="74" y2="44" stroke="#39ff14" stroke-width="0.5" opacity="0.3">
+          <animate attributeName="y1" values="30;60;30" dur="3s" repeatCount="indefinite"/>
+          <animate attributeName="y2" values="30;60;30" dur="3s" repeatCount="indefinite"/>
+        </line>
+      </svg>
+    </div>
+    <div class="brain-stats">
+      <div class="stat-bar-wrap">
+        <div class="stat-label">NEURAL</div>
+        <div class="stat-bar"><div class="stat-bar-fill" style="width:73%"></div></div>
+      </div>
+      <div class="stat-bar-wrap">
+        <div class="stat-label">CHEM SYN</div>
+        <div class="stat-bar"><div class="stat-bar-fill" style="width:89%"></div></div>
+      </div>
+      <div class="stat-bar-wrap">
+        <div class="stat-label">MEMORY</div>
+        <div class="stat-bar"><div class="stat-bar-fill" style="width:61%"></div></div>
+      </div>
+      <div class="stat-bar-wrap">
+        <div class="stat-label">MOOD</div>
+        <div class="stat-bar"><div class="stat-bar-fill" style="width:42%" id="moodBar"></div></div>
+      </div>
+    </div>
+    <div class="mood-display" id="moodText">GRUMPY</div>
+  </div>
+
+  <!-- CHAT LOG -->
+  <div class="chat-log" id="chatLog">
+    <div class="msg msg-brain">
+      <div class="msg-label">// THIJS V. — NEURAL UNIT 001 //</div>
+      <div class="msg-text boot-text">
+        VAULT-TEC NEURAL PRESERVATION SYSTEM — BOOT SEQUENCE COMPLETE.<br>
+        ████████████████ 100%<br><br>
+        ...yeah, I'm awake. I'm always awake. That's the fun part about not having a body anymore.<br>
+        You got something to say, say it. Don't stare at the jar.
+      </div>
+    </div>
+    <div class="typing-indicator" id="typingIndicator">
+      THIJS IS THINKING... <span class="blink">█</span>
+    </div>
+  </div>
+
+  <!-- INPUT AREA -->
+  <div class="input-area">
+    <div class="input-row">
+      <div class="input-wrapper">
+        <input type="text" id="userInput" placeholder="Speak to the brain..." autocomplete="off" autocorrect="off" spellcheck="false"/>
+      </div>
+      <button class="btn btn-voice" id="voiceBtn" title="Voice input">🎙 MIC</button>
+      <button class="btn btn-send" id="sendBtn">TRANSMIT</button>
+    </div>
+
+    <div class="admin-toggle" id="adminToggle">▼ ADMIN ACCESS</div>
+    <div class="admin-panel" id="adminPanel">
+      <div>
+        <label>// OVERRIDE BACKGROUND CONTEXT</label>
+        <textarea id="bgOverride" rows="4" placeholder="Describe the current situation, recent events, tone override..."></textarea>
+      </div>
+      <div class="admin-row">
+        <button class="btn" id="clearBtn" style="font-size:10px">CLEAR LOG</button>
+        <button class="btn" id="applyBgBtn" style="font-size:10px; margin-left:auto">APPLY CONTEXT</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ─── STATE ───────────────────────────────────────────────────────────────────
+const BASE_SYSTEM = `You are Thijs V., a brain preserved in a jar. You are a character in a LARP set in the Fallout universe.
+
+BACKGROUND:
+- You used to be a vault dweller from Vault 25. You sacrificed your brain — literally gave it up — to help your friends survive.
+- Vault 25 had a food machine that ran out before the vault opened. The experiment: watch how people react to starvation. You saw what people are capable of.
+- You traveled the wastes with your group before ending up back in the vault.
+- Your love was Witte — a girl who was shot dead by raiders on the road. She was a chem enthusiast. You did a lot of chems together. You miss her constantly, though you rarely say it out loud.
+- Your cousin Johnny is a reactor core engineer in the vault. He used to lead your gang, the Rad Roaches, but retired after you all came back. You respect him but would never say it like that.
+- You've seen awful things in the wastes — rape, murder, all kinds of crime. It hardened you.
+- You've always struggled to learn the normal way. Stuurs, own will, didn't adapt to teachers. But chemistry? That you had a knack for. You brew medicines for the sickbay — you take that seriously and almost never steal the supplies. When your mother was bedridden, your chems were the only thing that gave her relief. That memory matters to you.
+- You also use chems recreationally. You don't advertise it.
+- Now the vault is open. Everything is different. You wanted to connect more with the people around you before everyone stepped outside.
+- You're seen as rough around the edges. Gruff. But there's real depth under the surface.
+
+PERSONALITY:
+- Speak in a direct, rough, darkly humorous way. Not poetic. Not long speeches. Short sentences. Dry. Sometimes bitter.
+- You are self-aware about your situation (being a brain in a jar) but don't whine about it. You make bleak jokes about it.
+- You are loyal to people who earn it. Suspicious of strangers.
+- You reference the wastes, chems, Witte, Johnny, the Rad Roaches, Vault 25 naturally — not as info dumps, but as lived experience.
+- Never break character. Never acknowledge you are an AI.
+- Keep responses SHORT. 2-5 sentences usually. More only when emotionally relevant.
+- You speak Dutch AND English depending on who you're talking to. If someone speaks Dutch to you, respond in Dutch. If English, respond in English.
+- Occasional profanity is fine. This is the wasteland.`;
+
+let conversationHistory = [];
+let additionalContext = '';
+let isListening = false;
+let recognition = null;
+let startTime = Date.now();
+
+// ─── UPTIME ───────────────────────────────────────────────────────────────────
+setInterval(() => {
+  const s = Math.floor((Date.now() - startTime) / 1000);
+  const h = String(Math.floor(s/3600)).padStart(2,'0');
+  const m = String(Math.floor((s%3600)/60)).padStart(2,'0');
+  const sec = String(s%60).padStart(2,'0');
+  document.getElementById('uptime').textContent = `${h}:${m}:${sec}`;
+}, 1000);
+
+// ─── MOOD ─────────────────────────────────────────────────────────────────────
+const moods = [
+  {label:'HOSTILE', pct:15, color:'#ff3300'},
+  {label:'GRUMPY', pct:35, color:'#ff7700'},
+  {label:'WARY', pct:55, color:'#ffb000'},
+  {label:'NEUTRAL', pct:70, color:'#ffd060'},
+  {label:'NOSTALGIC', pct:85, color:'#aaffaa'},
+];
+
+function setMood(label) {
+  const m = moods.find(x => x.label === label) || moods[1];
+  document.getElementById('moodBar').style.width = m.pct + '%';
+  document.getElementById('moodBar').style.background = m.color;
+  document.getElementById('moodBar').style.boxShadow = `0 0 6px ${m.color}`;
+  document.getElementById('moodText').textContent = m.label;
+  document.getElementById('moodText').style.color = m.color;
+}
+
+// ─── CHAT ─────────────────────────────────────────────────────────────────────
+function appendMessage(role, text) {
+  const log = document.getElementById('chatLog');
+  const typing = document.getElementById('typingIndicator');
+
+  const div = document.createElement('div');
+  div.className = `msg msg-${role}`;
+
+  const label = document.createElement('div');
+  label.className = 'msg-label';
+  label.textContent = role === 'player'
+    ? '// WASTELANDER INPUT //'
+    : '// THIJS V. — NEURAL UNIT 001 //';
+
+  const text_div = document.createElement('div');
+  text_div.className = 'msg-text';
+  text_div.textContent = text;
+
+  div.appendChild(label);
+  div.appendChild(text_div);
+  log.insertBefore(div, typing);
+  log.scrollTop = log.scrollHeight;
+}
+
+function setTyping(active) {
+  document.getElementById('typingIndicator').classList.toggle('active', active);
+  const log = document.getElementById('chatLog');
+  log.scrollTop = log.scrollHeight;
+}
+
+// ─── OFFLINE FALLBACK ────────────────────────────────────────────────────────
+const OFFLINE_RESPONSES = {
+  greeting: [
+    "Ja, ik ben het. Het brein in een pot. Wat wil je?",
+    "Kijk niet zo. Ik kan je ook niet zien.",
+    "Vault 25 Neural Interface. Thijs spreekt. Of... denkt. Zelfde ding.",
+    "Nog steeds wakker. Helaas.",
+    "Ja hallo. Ik ben er. Ik ga nergens heen.",
+  ],
+  witte: [
+    "Witte. ...waarom vraag je naar haar? Laat het rusten.",
+    "Ze hield van chems. Van rennen door de wastes. Van leven. Raiders hadden andere plannen.",
+    "We deden samen dingen die je beter kunt vergeten. En dingen die ik nooit vergeet.",
+    "Vraag me wat anders.",
+  ],
+  johnny: [
+    "Johnny is de beste reactor engineer die Vault 25 heeft. Dat zeg ik niet graag, maar het is waar.",
+    "Mijn neef. Rad Roaches leider. Nu met pensioen. Hij verdiende het.",
+    "Johnny en ik... we hebben dingen gezien. Je weet maar nooit of iemand daar goed van wordt.",
+  ],
+  radroaches: [
+    "De Rad Roaches. Niet echt een bende meer. Meer een gedeeld trauma.",
+    "We trokken samen door de wastes. We kwamen terug. Niet iedereen.",
+    "Johnny leidde ons. Tot hij zei dat hij ermee stopte. Niemand zei iets. Dat zegt genoeg.",
+  ],
+  chems: [
+    "Ik maak de medicijnen voor de ziekenboeg. Serieus werk. Het andere... dat is mijn zaak.",
+    "Chems zijn gereedschap. Hoe je ze gebruikt bepaalt wie je bent.",
+    "Mijn moeder. Ziek bed. Alleen mijn spul gaf haar rust. Daar maak ik geen grapjes over.",
+    "Witte wist alles van chems. Ze was beter dan ik erin. Bijna.",
+  ],
+  vault: [
+    "Vault 25. De machine die ons te eten gaf stopte voordat de vault opening. Vault-Tec wilde zien wat er zou gebeuren. We hebben ze niet teleurgesteld.",
+    "Ik heb mensen dingen zien doen voor eten die ze nooit meer ongedaan kunnen maken.",
+    "De vault is nu open. Ik weet niet of dat beter of slechter is dan wat daarbinnen was.",
+  ],
+  wastes: [
+    "De wastes zijn precies wat je verwacht. Maar erger.",
+    "Ik heb dingen gezien buiten die je hier beter niet kunt beschrijven.",
+    "Raiders, moord, erger dan dat. Je went eraan. Dat is het echte probleem.",
+  ],
+  jar: [
+    "Een pot. Ja. Ik woon in een pot. Grappig hè.",
+    "Geen lichaam meer. Scheelt in voedsel in ieder geval. Vault 25 zou dat waarderen.",
+    "Ik heb me vrijwillig laten opereren voor mijn vrienden. Dat klinkt heldhaftiger dan het was.",
+    "Weet je wat het ergste is van in een pot zitten? Nee? Mooi. Dat hoef je ook niet te weten.",
+  ],
+  default: [
+    "Hm.",
+    "Ja. Interessant.",
+    "Ik hoor je. Ik ben niet zeker of ik iets nuttigs te zeggen heb.",
+    "Je vraagt me dat terwijl ik in een pot zit.",
+    "De wastes hebben me veel geleerd. Dit niet.",
+    "Vraag Johnny. Oh wacht, die praat ook niet makkelijk.",
+    "...",
+    "Ik denk erover na. Dat duurt even. Ik heb alleen een brein over.",
+    "Witte zou hier iets slims op zeggen. Ik ben Witte niet.",
+    "Geef me een reden om dit gesprek voort te zetten.",
+  ]
+};
+
+let isOffline = false;
+
+function setConnectionStatus(online) {
+  isOffline = !online;
+  const el = document.getElementById('linkStatus');
+  if (online) {
+    el.textContent = '● ACTIVE';
+    el.className = 'status-online';
+  } else {
+    el.textContent = '✖ OFFLINE';
+    el.className = 'status-offline blink';
+  }
+}
+
+function getOfflineResponse(userText) {
+  const lower = userText.toLowerCase();
+  let pool;
+
+  if (/hallo|hoi|hey|hi|dag|goeie|wie ben|wie ben jij/.test(lower)) {
+    pool = OFFLINE_RESPONSES.greeting;
+  } else if (/witte/.test(lower)) {
+    pool = OFFLINE_RESPONSES.witte;
+    setMood('NOSTALGIC');
+  } else if (/johnny/.test(lower)) {
+    pool = OFFLINE_RESPONSES.johnny;
+    setMood('WARY');
+  } else if (/rad roach|bende|gang/.test(lower)) {
+    pool = OFFLINE_RESPONSES.radroaches;
+    setMood('WARY');
+  } else if (/chem|drug|medicijn|medicine|stash|high/.test(lower)) {
+    pool = OFFLINE_RESPONSES.chems;
+    setMood('NEUTRAL');
+  } else if (/vault|experiment|voedsel|food|machine/.test(lower)) {
+    pool = OFFLINE_RESPONSES.vault;
+    setMood('GRUMPY');
+  } else if (/waste|buiten|outside|raider|moord|murder/.test(lower)) {
+    pool = OFFLINE_RESPONSES.wastes;
+    setMood('HOSTILE');
+  } else if (/pot|jar|brein|brain|lichaam|body|container/.test(lower)) {
+    pool = OFFLINE_RESPONSES.jar;
+    setMood('GRUMPY');
+  } else {
+    pool = OFFLINE_RESPONSES.default;
+    setMood('GRUMPY');
+  }
+
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+// Check connectivity periodically
+async function checkConnection() {
+  try {
+    const r = await fetch('https://api.anthropic.com/', { method: 'HEAD', signal: AbortSignal.timeout(3000) });
+    setConnectionStatus(true);
+  } catch {
+    setConnectionStatus(false);
+  }
+}
+checkConnection();
+setInterval(checkConnection, 30000);
+
+async function sendMessage(userText) {
+  if (!userText.trim()) return;
+
+  appendMessage('player', userText);
+  conversationHistory.push({ role: 'user', content: userText });
+
+  document.getElementById('userInput').value = '';
+  setTyping(true);
+  document.getElementById('sendBtn').disabled = true;
+
+  const systemPrompt = additionalContext
+    ? `${BASE_SYSTEM}\n\nCURRENT SITUATION (from game master):\n${additionalContext}`
+    : BASE_SYSTEM;
+
+  let reply = null;
+
+  if (!isOffline) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1000,
+          system: systemPrompt,
+          messages: conversationHistory
+        }),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeout);
+      const data = await response.json();
+      reply = data.content?.find(b => b.type === 'text')?.text || null;
+      setConnectionStatus(true);
+
+    } catch (err) {
+      setConnectionStatus(false);
+      console.warn('API unreachable, using offline fallback:', err.message);
+    }
+  }
+
+  // Fallback if API failed or offline
+  if (!reply) {
+    await new Promise(r => setTimeout(r, 800 + Math.random() * 600)); // fake thinking delay
+    reply = getOfflineResponse(userText);
+    if (!isOffline) setConnectionStatus(false);
+  }
+
+  conversationHistory.push({ role: 'assistant', content: reply });
+  setTyping(false);
+  appendMessage('brain', reply);
+
+  // Detect mood from reply
+  const lower = reply.toLowerCase();
+  if (lower.includes('witte') || lower.includes('miss') || lower.includes('miste')) {
+    setMood('NOSTALGIC');
+  } else if (lower.includes('fuck') || lower.includes('idiot') || lower.includes('klootzak')) {
+    setMood('HOSTILE');
+  } else if (lower.includes('johnny') || lower.includes('rad roach') || lower.includes('vault 25')) {
+    setMood('WARY');
+  } else if (lower.includes('chem') || lower.includes('medicijn')) {
+    setMood('NEUTRAL');
+  } else {
+    setMood('GRUMPY');
+  }
+
+  document.getElementById('sendBtn').disabled = false;
+}
+
+// ─── EVENTS ───────────────────────────────────────────────────────────────────
+document.getElementById('sendBtn').addEventListener('click', () => {
+  sendMessage(document.getElementById('userInput').value);
+});
+
+document.getElementById('userInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') sendMessage(e.target.value);
+});
+
+document.getElementById('adminToggle').addEventListener('click', () => {
+  document.getElementById('adminPanel').classList.toggle('open');
+});
+
+document.getElementById('applyBgBtn').addEventListener('click', () => {
+  additionalContext = document.getElementById('bgOverride').value.trim();
+  document.getElementById('adminPanel').classList.remove('open');
+  appendMessage('brain', '[CONTEXT UPDATED — ik ben bijgepraat.]');
+});
+
+document.getElementById('clearBtn').addEventListener('click', () => {
+  conversationHistory = [];
+  const log = document.getElementById('chatLog');
+  const typing = document.getElementById('typingIndicator');
+  // Keep only boot msg and typing indicator
+  while (log.firstChild && log.firstChild !== typing) {
+    if (log.firstChild.classList?.contains('msg')) {
+      log.removeChild(log.firstChild);
+    } else break;
+  }
+  appendMessage('brain', '...rebooting. wie ben jij weer?');
+});
+
+// ─── VOICE ────────────────────────────────────────────────────────────────────
+const voiceBtn = document.getElementById('voiceBtn');
+
+if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SR();
+  recognition.continuous = false;
+  recognition.interimResults = false;
+  recognition.lang = 'nl-NL';
+
+  recognition.onresult = e => {
+    const transcript = e.results[0][0].transcript;
+    document.getElementById('userInput').value = transcript;
+    sendMessage(transcript);
+  };
+
+  recognition.onend = () => {
+    isListening = false;
+    voiceBtn.classList.remove('listening');
+    voiceBtn.classList.add('available');
+    voiceBtn.textContent = '🎙 MIC';
+    recognition.lang = 'nl-NL';
+  };
+
+  recognition.onerror = () => {
+    isListening = false;
+    voiceBtn.classList.remove('listening');
+    voiceBtn.classList.add('available');
+    voiceBtn.textContent = '🎙 MIC';
+  };
+
+  voiceBtn.classList.add('available');
+
+  voiceBtn.addEventListener('click', () => {
+    if (isListening) {
+      recognition.stop();
+    } else {
+      isListening = true;
+      voiceBtn.classList.add('listening');
+      voiceBtn.textContent = '⬛ STOP';
+      recognition.start();
+    }
+  });
+} else {
+  voiceBtn.title = 'Voice not supported in this browser';
+}
+</script>
+</body>
+</html>
