@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Riool Kaart – D&D</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0a0a0f; color: #c8a96e; font-family: 'Georgia', serif; overflow: hidden; }
+  #ui { position: fixed; top: 10px; right: 10px; background: rgba(10,10,20,0.92); border: 1px solid #3a2a10; padding: 12px; width: 220px; border-radius: 4px; z-index: 10; }
+  #ui h2 { font-size: 13px; letter-spacing: 2px; text-transform: uppercase; color: #e8c070; margin-bottom: 10px; border-bottom: 1px solid #3a2a10; padding-bottom: 6px; }
+  .gate-row { display: flex; align-items: center; justify-content: space-between; margin: 6px 0; }
+  .gate-row label { font-size: 12px; }
+  .toggle { cursor: pointer; width: 42px; height: 22px; background: #1a1a2e; border: 1px solid #3a2a10; border-radius: 11px; position: relative; transition: background 0.3s; }
+  .toggle.open { background: #1a4a2e; border-color: #2a8a4a; }
+  .toggle::after { content:''; position:absolute; top:3px; left:3px; width:14px; height:14px; background:#5a3a10; border-radius:50%; transition: left 0.3s, background 0.3s; }
+  .toggle.open::after { left:23px; background:#2ada6a; }
+  #water-info { margin-top: 10px; font-size: 12px; }
+  #water-bar-bg { background: #111; border: 1px solid #3a2a10; height: 10px; border-radius: 5px; margin-top: 4px; overflow: hidden; }
+  #water-bar { height: 100%; background: linear-gradient(90deg, #1a4a7a, #2a8aca); width: 0%; transition: width 1s; border-radius: 5px; }
+  #spotlight-info { margin-top: 10px; font-size: 11px; color: #888; border-top: 1px solid #3a2a10; padding-top: 8px; }
+  #room-label { margin-top: 8px; font-size: 12px; color: #e8c070; min-height: 16px; }
+  canvas { display: block; cursor: crosshair; }
+  #reset-btn { margin-top: 10px; width: 100%; padding: 5px; background: #1a0a00; border: 1px solid #5a3a10; color: #c8a96e; cursor: pointer; font-family: Georgia, serif; font-size: 12px; border-radius: 3px; }
+  #reset-btn:hover { background: #2a1a00; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <h2>⚙ Sluisdeuren</h2>
+  <div class="gate-row"><label>Sluis A (Gang 1)</label><div class="toggle" id="gA" onclick="toggleGate('A')"></div></div>
+  <div class="gate-row"><label>Sluis B (Gang 2)</label><div class="toggle" id="gB" onclick="toggleGate('B')"></div></div>
+  <div class="gate-row"><label>Sluis C (Zijkamer)</label><div class="toggle" id="gC" onclick="toggleGate('C')"></div></div>
+  <div class="gate-row"><label>Sluis D (Grote Hal)</label><div class="toggle" id="gD" onclick="toggleGate('D')"></div></div>
+  <div id="water-info">
+    <span>Waterpeil: <span id="water-pct">0</span>%</span>
+    <div id="water-bar-bg"><div id="water-bar"></div></div>
+  </div>
+  <div id="spotlight-info">Klik op de kaart om de spotlight te richten.</div>
+  <div id="room-label"></div>
+  <button id="reset-btn" onclick="resetAll()">Alles resetten</button>
+</div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let W, H, scale;
+let spotlight = null;
+let spotlightTarget = null;
+let spotlightCurrent = null;
+let animFrame;
+
+const gates = { A: false, B: false, C: false, D: false };
+let waterLevel = 0;
+let waterTarget = 0;
+
+// Map layout (normalized 0-1 coords, will be scaled)
+// Rooms defined as {id, x, y, w, h, label, waterDepth, gateId}
+// Corridors as connections
+// Layout:
+//   Room1 (top-left) -- corridor -- Room2 (top-right)
+//       |                               |
+//   corridor                        corridor
+//       |                               |
+//   Room3 (bottom-left) -- corridor -- Room4 (bottom-right)
+//                    \              /
+//                     -- Grote Hal (center-bottom)
+
+function layout() {
+  const mx = W * 0.05;
+  const my = H * 0.05;
+  const mw = W * 0.9;
+  const mh = H * 0.88;
+
+  return {
+    rooms: [
+      { id:'R1', x: mx + mw*0.05, y: my + mh*0.05, w: mw*0.22, h: mh*0.28, label:'Ruimte 1\n(Pompkamer)', baseWater: 0.08 },
+      { id:'R2', x: mx + mw*0.73, y: my + mh*0.05, w: mw*0.22, h: mh*0.28, label:'Ruimte 2\n(Filterput)', baseWater: 0.08 },
+      { id:'R3', x: mx + mw*0.05, y: my + mh*0.45, w: mw*0.22, h: mh*0.28, label:'Ruimte 3\n(Opslagkuil)', baseWater: 0.12 },
+      { id:'R4', x: mx + mw*0.73, y: my + mh*0.45, w: mw*0.22, h: mh*0.28, label:'Ruimte 4\n(Overloopkamer)', baseWater: 0.12 },
+      { id:'HALL', x: mx + mw*0.28, y: my + mh*0.58, w: mw*0.44, h: mh*0.37, label:'Grote Hal\n(Vergaarbekken)', baseWater: 0.20 }
+    ],
+    corridors: [
+      { x1f: 0.27, y1f: 0.19, x2f: 0.73, y2f: 0.19, w: 0.055, label:'Gang A', gateId:'A', gatePos:0.5 },
+      { x1f: 0.27, y1f: 0.59, x2f: 0.50, y2f: 0.59, w: 0.055, label:'Gang B', gateId:'B', gatePos:0.5 },
+      { x1f: 0.73, y1f: 0.59, x2f: 0.50, y2f: 0.59, w: 0.055, label:'Gang C', gateId:'C', gatePos:0.5 },
+      { x1f: 0.16, y1f: 0.33, x2f: 0.16, y2f: 0.45, w: 0.055, label:'Vert 1', gateId:null },
+      { x1f: 0.84, y1f: 0.33, x2f: 0.84, y2f: 0.45, w: 0.055, label:'Vert 2', gateId:null },
+      { x1f: 0.50, y1f: 0.745, x2f: 0.50, y2f: 0.82, w: 0.10, label:'Inloop', gateId:'D', gatePos:0.5 },
+    ]
+  };
+}
+
+function getLayout() {
+  return layout();
+}
+
+function toggleGate(id) {
+  gates[id] = !gates[id];
+  document.getElementById('g'+id).classList.toggle('open', gates[id]);
+  recalcWater();
+}
+
+function recalcWater() {
+  const openCount = Object.values(gates).filter(Boolean).length;
+  waterTarget = openCount / 4;
+  animateWater();
+}
+
+function animateWater() {
+  const bar = document.getElementById('water-bar');
+  const pct = document.getElementById('water-pct');
+  if (Math.abs(waterLevel - waterTarget) > 0.001) {
+    waterLevel += (waterTarget - waterLevel) * 0.04;
+    bar.style.width = (waterLevel * 100).toFixed(1) + '%';
+    pct.textContent = Math.round(waterLevel * 100);
+  } else {
+    waterLevel = waterTarget;
+    bar.style.width = (waterLevel * 100) + '%';
+    pct.textContent = Math.round(waterLevel * 100);
+  }
+}
+
+function resetAll() {
+  ['A','B','C','D'].forEach(id => {
+    gates[id] = false;
+    document.getElementById('g'+id).classList.remove('open');
+  });
+  waterTarget = 0;
+  spotlight = null;
+  spotlightTarget = null;
+  spotlightCurrent = null;
+  document.getElementById('room-label').textContent = '';
+}
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+
+function hexToRgb(hex) {
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  return {r,g,b};
+}
+
+function roomAtPoint(px, py) {
+  const l = getLayout();
+  for (const r of l.rooms) {
+    if (px >= r.x && px <= r.x+r.w && py >= r.y && py <= r.y+r.h) return r;
+  }
+  return null;
+}
+
+canvas.addEventListener('click', e => {
+  const rect = canvas.getBoundingClientRect();
+  const px = e.clientX - rect.left;
+  const py = e.clientY - rect.top;
+  spotlightTarget = { x: px, y: py };
+  if (!spotlightCurrent) spotlightCurrent = { x: px, y: py };
+  const room = roomAtPoint(px, py);
+  document.getElementById('room-label').textContent = room ? room.label.replace('\n',' – ') : '';
+});
+
+function drawStone(x, y, w, h, fillColor, lineColor) {
+  ctx.save();
+  // Stone block fill
+  ctx.fillStyle = fillColor;
+  ctx.fillRect(x, y, w, h);
+
+  // Stone texture lines
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = 0.5;
+  ctx.globalAlpha = 0.25;
+  const brickH = 18, brickW = 36;
+  for (let row = 0; row * brickH < h; row++) {
+    const offsetX = (row % 2) * (brickW / 2);
+    for (let col = -1; col * brickW < w + brickW; col++) {
+      const bx = x + col * brickW + offsetX;
+      const by = y + row * brickH;
+      ctx.strokeRect(bx, by, brickW, brickH);
+    }
+  }
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x, y, w, h);
+  ctx.restore();
+}
+
+function drawWater(x, y, w, h, level, alpha=1) {
+  if (level <= 0) return;
+  const waterH = h * level;
+  const wy = y + h - waterH;
+  ctx.save();
+  ctx.globalAlpha = alpha * 0.72;
+  const grad = ctx.createLinearGradient(x, wy, x, y+h);
+  grad.addColorStop(0, '#1a5a9a');
+  grad.addColorStop(1, '#0a2a4a');
+  ctx.fillStyle = grad;
+  ctx.fillRect(x, wy, w, waterH);
+
+  // Ripple lines
+  ctx.globalAlpha = alpha * 0.25;
+  ctx.strokeStyle = '#4acaff';
+  ctx.lineWidth = 1;
+  for (let i = 1; i <= 3; i++) {
+    const ry = wy + (waterH / 4) * i;
+    ctx.beginPath();
+    for (let xi = x; xi < x+w; xi += 8) {
+      const wave = Math.sin((xi * 0.05) + Date.now() * 0.001 * i) * 1.5;
+      if (xi === x) ctx.moveTo(xi, ry + wave);
+      else ctx.lineTo(xi, ry + wave);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawGate(x, y, vertical, open, gateId) {
+  const gw = vertical ? 6 : 24;
+  const gh = vertical ? 24 : 6;
+  ctx.save();
+  if (open) {
+    // Gate is open – draw slid to side
+    ctx.globalAlpha = 0.5;
+  }
+  ctx.fillStyle = open ? '#2a8a4a' : '#8a2a10';
+  ctx.strokeStyle = open ? '#4ada7a' : '#da5a30';
+  ctx.lineWidth = 1.5;
+  const ox = open ? (vertical ? 0 : gw * 1.5) : 0;
+  const oy = open ? (vertical ? gh * 1.5 : 0) : 0;
+  ctx.fillRect(x - gw/2 + ox, y - gh/2 + oy, gw, gh);
+  ctx.strokeRect(x - gw/2 + ox, y - gh/2 + oy, gw, gh);
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+function drawCorridor(cor, mx, my, mw, mh) {
+  const x1 = mx + mw * cor.x1f;
+  const y1 = my + mh * cor.y1f;
+  const x2 = mx + mw * cor.x2f;
+  const y2 = my + mh * cor.y2f;
+  const cw = mw * cor.w;
+
+  const dx = x2 - x1, dy = y2 - y1;
+  const len = Math.sqrt(dx*dx + dy*dy);
+  const nx = -dy/len, ny = dx/len;
+
+  ctx.save();
+  ctx.fillStyle = '#1a1520';
+  ctx.strokeStyle = '#3a2a15';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x1 + nx*cw/2, y1 + ny*cw/2);
+  ctx.lineTo(x2 + nx*cw/2, y2 + ny*cw/2);
+  ctx.lineTo(x2 - nx*cw/2, y2 - ny*cw/2);
+  ctx.lineTo(x1 - nx*cw/2, y1 - ny*cw/2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Water in corridor
+  const openGates = Object.values(gates).filter(Boolean).length;
+  const corrWater = waterLevel * 0.6;
+  if (corrWater > 0) {
+    const wh = cw * corrWater;
+    ctx.globalAlpha = 0.65;
+    const grad = ctx.createLinearGradient(x1, y1, x2, y2);
+    grad.addColorStop(0, '#1a5a9a');
+    grad.addColorStop(1, '#0a2a4a');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(x1 + nx*(cw/2 - wh), y1 + ny*(cw/2 - wh));
+    ctx.lineTo(x2 + nx*(cw/2 - wh), y2 + ny*(cw/2 - wh));
+    ctx.lineTo(x2 - nx*(cw/2), y2 - ny*(cw/2));
+    ctx.lineTo(x1 - nx*(cw/2), y1 - ny*(cw/2));
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // Gate
+  if (cor.gateId) {
+    const gp = cor.gatePos || 0.5;
+    const gx = x1 + dx*gp;
+    const gy = y1 + dy*gp;
+    const isVert = Math.abs(dy) > Math.abs(dx);
+    drawGate(gx, gy, isVert, gates[cor.gateId], cor.gateId);
+
+    // Gate label
+    ctx.fillStyle = '#c8a96e';
+    ctx.font = '10px Georgia';
+    ctx.textAlign = 'center';
+    ctx.fillText('Sluis ' + cor.gateId, gx + (isVert ? 18 : 0), gy + (isVert ? 0 : -12));
+  }
+
+  ctx.restore();
+}
+
+function drawRoom(room) {
+  const wl = waterLevel * room.baseWater * 5;
+  drawStone(room.x, room.y, room.w, room.h, '#161220', '#3a2a15');
+  drawWater(room.x+2, room.y+2, room.w-4, room.h-4, Math.min(wl, 0.85));
+
+  // Room label
+  ctx.save();
+  ctx.fillStyle = '#c8a96e';
+  ctx.font = room.id === 'HALL' ? 'bold 13px Georgia' : '11px Georgia';
+  ctx.textAlign = 'center';
+  ctx.globalAlpha = 0.85;
+  const lines = room.label.split('\n');
+  const lx = room.x + room.w/2;
+  const ly = room.y + 18;
+  lines.forEach((line, i) => ctx.fillText(line, lx, ly + i*15));
+  ctx.restore();
+
+  // Torch icon
+  if (room.id !== 'HALL') {
+    drawTorch(room.x + 8, room.y + 8);
+  }
+}
+
+function drawTorch(x, y) {
+  ctx.save();
+  ctx.strokeStyle = '#e8a020';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y+10); ctx.stroke();
+  ctx.fillStyle = `rgba(255,180,30,${0.6 + 0.4*Math.sin(Date.now()*0.005)})`;
+  ctx.beginPath();
+  ctx.arc(x, y-2, 3 + Math.sin(Date.now()*0.007)*1, 0, Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawSpotlight(cx, cy) {
+  ctx.save();
+  const r = Math.min(W, H) * 0.18;
+  const radial = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+  radial.addColorStop(0, 'rgba(255,230,150,0.18)');
+  radial.addColorStop(0.4, 'rgba(255,210,100,0.06)');
+  radial.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = radial;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI*2);
+  ctx.fill();
+
+  // Hard rim
+  ctx.strokeStyle = 'rgba(255,220,120,0.3)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 0.38, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawDarkOverlay(lightX, lightY) {
+  ctx.save();
+  const r = Math.min(W, H) * 0.18;
+  const radial = ctx.createRadialGradient(lightX, lightY, r*0.4, lightX, lightY, r*1.4);
+  radial.addColorStop(0, 'rgba(0,0,0,0)');
+  radial.addColorStop(1, 'rgba(0,0,0,0.82)');
+  ctx.fillStyle = radial;
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+}
+
+function drawCompass() {
+  const cx = 50, cy = H - 50, r = 28;
+  ctx.save();
+  ctx.strokeStyle = '#5a4020';
+  ctx.fillStyle = '#0a0a10';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#c8a96e';
+  ctx.font = 'bold 10px Georgia';
+  ctx.textAlign = 'center';
+  ctx.fillText('N', cx, cy - r + 13);
+  ctx.fillText('Z', cx, cy + r - 4);
+  ctx.fillText('W', cx - r + 7, cy + 4);
+  ctx.fillText('O', cx + r - 7, cy + 4);
+  ctx.strokeStyle = '#da5a30';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(cx, cy-r+16); ctx.lineTo(cx, cy); ctx.stroke();
+  ctx.strokeStyle = '#888';
+  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx, cy+r-8); ctx.stroke();
+  ctx.restore();
+}
+
+function drawLegend() {
+  const lx = 10, ly = H - 200;
+  ctx.save();
+  ctx.fillStyle = 'rgba(10,10,20,0.8)';
+  ctx.strokeStyle = '#3a2a10';
+  ctx.lineWidth = 1;
+  ctx.fillRect(lx, ly, 130, 90);
+  ctx.strokeRect(lx, ly, 130, 90);
+  ctx.font = '10px Georgia';
+  ctx.textAlign = 'left';
+  // Gesloten sluis
+  ctx.fillStyle = '#8a2a10'; ctx.fillRect(lx+8, ly+14, 16, 8); ctx.fillStyle='#c8a96e'; ctx.fillText('Gesloten sluis', lx+30, ly+21);
+  // Open sluis
+  ctx.fillStyle = '#2a8a4a'; ctx.fillRect(lx+8, ly+30, 16, 8); ctx.fillStyle='#c8a96e'; ctx.fillText('Open sluis', lx+30, ly+37);
+  // Water
+  ctx.fillStyle = '#1a5a9a'; ctx.fillRect(lx+8, ly+46, 16, 8); ctx.fillStyle='#c8a96e'; ctx.fillText('Water', lx+30, ly+53);
+  // Steen
+  ctx.fillStyle = '#161220'; ctx.strokeStyle='#3a2a15'; ctx.strokeRect(lx+8, ly+62, 16, 8); ctx.fillRect(lx+8, ly+62, 16, 8); ctx.fillStyle='#c8a96e'; ctx.fillText('Steen muur', lx+30, ly+69);
+  ctx.restore();
+}
+
+let lastTime = 0;
+function draw(ts) {
+  animFrame = requestAnimationFrame(draw);
+  if (ts - lastTime < 33) return; // ~30fps
+  lastTime = ts;
+
+  animateWater();
+
+  if (spotlightTarget && spotlightCurrent) {
+    spotlightCurrent.x += (spotlightTarget.x - spotlightCurrent.x) * 0.08;
+    spotlightCurrent.y += (spotlightTarget.y - spotlightCurrent.y) * 0.08;
+  }
+
+  ctx.clearRect(0, 0, W, H);
+
+  // Background
+  ctx.fillStyle = '#080810';
+  ctx.fillRect(0, 0, W, H);
+
+  // Ambient floor texture
+  ctx.save();
+  ctx.globalAlpha = 0.07;
+  for (let xx = 0; xx < W; xx += 40) for (let yy = 0; yy < H; yy += 40) {
+    ctx.fillStyle = ((xx+yy)/40 % 2 === 0) ? '#111' : '#0a0a0a';
+    ctx.fillRect(xx, yy, 40, 40);
+  }
+  ctx.restore();
+
+  const l = getLayout();
+  const [r1] = l.rooms;
+  const mx = r1.x - W * 0.05;
+  const my = r1.y - H * 0.05;
+  const mw = W * 0.9;
+  const mh = H * 0.88;
+
+  // Draw corridors first (under rooms)
+  l.corridors.forEach(c => drawCorridor(c, mx, my, mw, mh));
+
+  // Draw rooms
+  l.rooms.forEach(r => drawRoom(r));
+
+  // Spotlight overlay
+  if (spotlightCurrent) {
+    drawSpotlight(spotlightCurrent.x, spotlightCurrent.y);
+    drawDarkOverlay(spotlightCurrent.x, spotlightCurrent.y);
+  } else {
+    // Global dim when no spotlight
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
+  drawCompass();
+  drawLegend();
+
+  // Title
+  ctx.save();
+  ctx.fillStyle = '#c8a96e';
+  ctx.font = 'bold 18px Georgia';
+  ctx.textAlign = 'left';
+  ctx.globalAlpha = 0.8;
+  ctx.fillText('Vault-25 Rioolsysteem', 10, 26);
+  ctx.font = '11px Georgia';
+  ctx.fillStyle = '#886644';
+  ctx.fillText('Klik op de kaart om spotlight te verplaatsen', 10, 44);
+  ctx.restore();
+}
+
+window.addEventListener('resize', () => { resize(); });
+resize();
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
