@@ -429,12 +429,16 @@ function draw(ts) {
   ctx.fillStyle = '#080810';
   ctx.fillRect(0, 0, W, H);
 
-  // Ambient floor texture
+  // Ambient floor grid
   ctx.save();
-  ctx.globalAlpha = 0.07;
-  for (let xx = 0; xx < W; xx += 40) for (let yy = 0; yy < H; yy += 40) {
-    ctx.fillStyle = ((xx+yy)/40 % 2 === 0) ? '#111' : '#0a0a0a';
-    ctx.fillRect(xx, yy, 40, 40);
+  ctx.globalAlpha = 0.18;
+  ctx.strokeStyle = '#c8a020';
+  ctx.lineWidth = 0.5;
+  for (let xx = 0; xx <= W; xx += 40) {
+    ctx.beginPath(); ctx.moveTo(xx, 0); ctx.lineTo(xx, H); ctx.stroke();
+  }
+  for (let yy = 0; yy <= H; yy += 40) {
+    ctx.beginPath(); ctx.moveTo(0, yy); ctx.lineTo(W, yy); ctx.stroke();
   }
   ctx.restore();
 
